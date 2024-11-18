@@ -34,7 +34,6 @@
 
 enum FieldType { INT, FLOAT, STRING };
 
-// RLE Compression Functions
 std::string applyRLE(const std::string& input) {
     std::stringstream ss;
     for (size_t i = 0; i < input.length(); i++) {
@@ -90,7 +89,7 @@ public:
     }
 
     Field(const std::string& s) : type(STRING) {
-        data_length = s.size() + 1;  // include null-terminator
+        data_length = s.size() + 1;  
         data = std::make_unique<char[]>(data_length);
         std::memcpy(data.get(), s.c_str(), data_length);
     }
@@ -176,7 +175,7 @@ public:
             std::string original_str = asString();
             std::string compressed_str = applyRLE(original_str);
             if (compressed_str.size() < original_str.size()) {
-                data_length = compressed_str.size() + 1; // Include null terminator
+                data_length = compressed_str.size() + 1;
                 data = std::make_unique<char[]>(data_length);
                 std::memcpy(data.get(), compressed_str.c_str(), data_length);
                 is_compressed = true;
@@ -257,14 +256,12 @@ struct Slot {
     uint16_t length = INVALID_VALUE;    // Length of the slot
 };
 
-// Slotted Page class
 class SlottedPage {
 public:
     std::unique_ptr<char[]> page_data = std::make_unique<char[]>(PAGE_SIZE);
     size_t metadata_size = sizeof(Slot) * MAX_SLOTS;
 
     SlottedPage(){
-        // Empty page -> initialize slot array inside page
         Slot* slot_array = reinterpret_cast<Slot*>(page_data.get());
         for (size_t slot_itr = 0; slot_itr < MAX_SLOTS; slot_itr++) {
             slot_array[slot_itr].empty = true;
@@ -273,10 +270,8 @@ public:
         }
     }
 
-    // Add a tuple, returns true if it fits, false otherwise.
     bool addTuple(std::unique_ptr<Tuple> tuple) {
 
-        // Serialize the tuple into a char array
         for (auto& field : tuple->fields) {
             field->compress();
         }
@@ -284,9 +279,7 @@ public:
         auto serializedTuple = tuple->serialize();
         size_t tuple_size = serializedTuple.size();
 
-        //std::cout << "Tuple size: " << tuple_size << " bytes\n";
 
-        // Check for first slot with enough space
         size_t slot_itr = 0;
         Slot* slot_array = reinterpret_cast<Slot*>(page_data.get());        
         for (; slot_itr < MAX_SLOTS; slot_itr++) {
@@ -296,12 +289,9 @@ public:
             }
         }
         if (slot_itr == MAX_SLOTS){
-            //std::cout << "Page does not contain an empty slot with sufficient space to store the tuple.";
             return false;
         }
 
-        // Identify the offset where the tuple will be placed in the page
-        // Update slot meta-data if needed
         slot_array[slot_itr].empty = false;
         size_t offset = INVALID_VALUE;
         if (slot_array[slot_itr].offset == INVALID_VALUE){
@@ -334,7 +324,6 @@ public:
             slot_array[slot_itr].length = tuple_size;
         }
 
-        // Copy serialized data into the page
         std::memcpy(page_data.get() + offset, 
                     serializedTuple.c_str(), 
                     tuple_size);
@@ -343,24 +332,18 @@ public:
     }
     void compress() {
         Slot* slot_array = reinterpret_cast<Slot*>(page_data.get());
-        // Iterate over all slots and compress tuples
         for (size_t slot_itr = 0; slot_itr < MAX_SLOTS; slot_itr++) {
             Slot& slot = slot_array[slot_itr];
             if (!slot.empty) {
-                // Get the tuple data
                 char* tuple_data = page_data.get() + slot.offset;
                 std::istringstream iss(std::string(tuple_data, slot.length));
                 auto tuple = Tuple::deserialize(iss);
 
-                // Compress string fields
                 for (auto& field : tuple->fields) {
                     field->compress();
                 }
 
-                // Serialize and update the slot
                 std::string serialized_tuple = tuple->serialize();
-                // Update slot length and data
-                // Handle potential size changes due to compression
             }
         }
     }
@@ -368,7 +351,6 @@ public:
     void decompress() {
         Slot* slot_array = reinterpret_cast<Slot*>(page_data.get());
 
-        // Temporary buffer to rebuild the page data after decompression
         std::unique_ptr<char[]> new_page_data = std::make_unique<char[]>(PAGE_SIZE);
         size_t metadata_end = sizeof(Slot) * MAX_SLOTS;
         size_t current_offset = metadata_end;
@@ -376,40 +358,32 @@ public:
         for (size_t slot_itr = 0; slot_itr < MAX_SLOTS; slot_itr++) {
             Slot& slot = slot_array[slot_itr];
             if (!slot.empty) {
-                // Extract the tuple data
                 char* tuple_data = page_data.get() + slot.offset;
                 std::string serialized_tuple(tuple_data, slot.length);
                 std::istringstream iss(serialized_tuple);
                 auto tuple = Tuple::deserialize(iss);
 
-                // Decompress each field in the tuple
                 for (auto& field : tuple->fields) {
                     field->decompress();
                 }
 
-                // Serialize the decompressed tuple
                 std::string decompressed_data = tuple->serialize();
                 size_t decompressed_length = decompressed_data.size();
 
-                // Check if there's enough space in the new page data
                 if (current_offset + decompressed_length > PAGE_SIZE) {
                     std::cerr << "Error: Decompressed data exceeds page size.\n";
                     exit(-1);
                 }
 
-                // Copy the decompressed data into the new page data
                 std::memcpy(new_page_data.get() + current_offset, decompressed_data.c_str(), decompressed_length);
 
-                // Update slot metadata
                 slot.offset = current_offset;
                 slot.length = decompressed_length;
 
-                // Move the current offset
                 current_offset += decompressed_length;
             }
         }
 
-        // Replace the old page data with the new one
         std::memcpy(page_data.get(), new_page_data.get(), PAGE_SIZE);
     }
 
@@ -650,7 +624,6 @@ public:
         }
 
         auto page = storage_manager.load(page_id);
-        //page->decompress();
         policy->touch(page_id);
         // std::cout << "Loading page: " << page_id << "\n";
         pageMap[page_id] = std::move(*page);
@@ -659,7 +632,6 @@ public:
 
     void flushPage(int page_id) {
         auto& page = pageMap[page_id];
-        //page.compress(); 
         storage_manager.flush(page_id, page);
     }
 
@@ -1116,7 +1088,6 @@ class BTree {
 };
 
 int main(int argc, char* argv[]) {
-    // Unit Tests for RLE Compression Functions
     auto testApplyRLE = []() {
         std::string input = "aaabbbcccaaa";
         std::string expected = "a3b3c3a3";
@@ -1134,7 +1105,6 @@ int main(int argc, char* argv[]) {
     };
 
     auto testRLEEdgeCases = []() {
-        // Test empty string
         std::string input = "";
         std::string output = applyRLE(input);
         assert(output == "");
@@ -1153,7 +1123,6 @@ int main(int argc, char* argv[]) {
     };
 
     auto testFieldCompression = []() {
-    // Test for STRING field
     std::string original_str = "aaabbbcccaaa";
     Field string_field(original_str);
 
@@ -1170,50 +1139,41 @@ int main(int argc, char* argv[]) {
 
     std::cout << "STRING compression test passed.\n";
 
-    // Test for INT field
     int original_int = 42;
     Field int_field(original_int);
 
-    int_field.compress(); // Compress should have no effect
-    assert(int_field.asInt() == original_int); // Value remains the same
-    assert(int_field.is_compressed == false); // No compression applied
+    int_field.compress(); 
+    assert(int_field.asInt() == original_int); 
+    assert(int_field.is_compressed == false); 
 
-    int_field.decompress(); // Decompress should also have no effect
+    int_field.decompress(); 
     assert(int_field.asInt() == original_int);
 
     std::cout << "INT compression test passed.\n";
 
-    // Test for FLOAT field
     float original_float = 3.14159f;
     Field float_field(original_float);
 
-    float_field.compress(); // Compress should have no effect
-    assert(float_field.asFloat() == original_float); // Value remains the same
-    assert(float_field.is_compressed == false); // No compression applied
+    float_field.compress(); 
+    assert(float_field.asFloat() == original_float); 
+    assert(float_field.is_compressed == false); 
 
-    float_field.decompress(); // Decompress should also have no effect
+    float_field.decompress(); 
     assert(float_field.asFloat() == original_float);
 
     std::cout << "FLOAT compression test passed.\n";
 };
 
-    // Integration Test for Tuple Insertion and Retrieval with Compression
     auto testTupleInsertionAndRetrieval = []() {
         SlottedPage page;
 
-        // Create a tuple with repetitive string data
         auto tuple = std::make_unique<Tuple>();
-        tuple->addField(std::make_unique<Field>(42)); // INT field
-        tuple->addField(std::make_unique<Field>("aaabbbcccaaa")); // STRING field
+        tuple->addField(std::make_unique<Field>(42)); 
+        tuple->addField(std::make_unique<Field>("aaabbbcccaaa")); 
 
-        // Add the tuple to the page
         bool success = page.addTuple(std::move(tuple));
         assert(success == true);
 
-        // Decompress the page
-        //page.decompress();
-
-        // Retrieve and verify the tuple
         Slot* slot_array = reinterpret_cast<Slot*>(page.page_data.get());
         for (size_t slot_itr = 0; slot_itr < MAX_SLOTS; slot_itr++) {
             if (!slot_array[slot_itr].empty) {
@@ -1222,10 +1182,8 @@ int main(int argc, char* argv[]) {
                 std::istringstream iss(std::string(tuple_data, tuple_length));
                 auto loadedTuple = Tuple::deserialize(iss);
 
-                // Check INT field
                 assert(loadedTuple->fields[0]->asInt() == 42);
 
-                // Check STRING field
                 loadedTuple->fields[1]->decompress();
                 assert(loadedTuple->fields[1]->asString() == "aaabbbcccaaa");
             }
@@ -1234,28 +1192,19 @@ int main(int argc, char* argv[]) {
         std::cout << "testTupleInsertionAndRetrieval passed.\n";
     };
 
-
-    // Integration Test for Database Operations with Compression
     auto testDatabaseOperations = []() {
-        BufferManager buffer_manager(true); // Truncate mode
-        // Assuming BTree is properly defined elsewhere in your code
-        // For this test, we'll focus on SlottedPage and compression
-
+        BufferManager buffer_manager(true); 
         SlottedPage page;
 
-        // Insert tuples with string data
         for (uint64_t i = 0; i < 10; ++i) {
-            std::string str = "aaaabbbbccccddddeeee"; // Repetitive string
+            std::string str = "aaaabbbbccccddddeeee"; 
             auto tuple = std::make_unique<Tuple>();
-            tuple->addField(std::make_unique<Field>(static_cast<int>(i))); // INT field
-            tuple->addField(std::make_unique<Field>(str)); // STRING field
+            tuple->addField(std::make_unique<Field>(static_cast<int>(i)));
+            tuple->addField(std::make_unique<Field>(str)); 
 
             bool success = page.addTuple(std::move(tuple));
             assert(success == true);
         }
-
-        // Decompress the page and verify
-        //page.decompress();
 
         Slot* slot_array = reinterpret_cast<Slot*>(page.page_data.get());
         for (size_t slot_itr = 0; slot_itr < MAX_SLOTS; slot_itr++) {
@@ -1265,11 +1214,9 @@ int main(int argc, char* argv[]) {
                 std::istringstream iss(serialized_tuple);
                 auto loadedTuple = Tuple::deserialize(iss);
 
-                // Check INT field
                 int expected_int = static_cast<int>(slot_itr);
                 assert(loadedTuple->fields[0]->asInt() == expected_int);
 
-                // Check STRING field
                 loadedTuple->fields[1]->decompress();
                 std::string expected_str = "aaaabbbbccccddddeeee";
                 assert(loadedTuple->fields[1]->asString() == expected_str);
@@ -1635,8 +1582,11 @@ int main(int argc, char* argv[]) {
         }
 
         std::cout << "\033[1m\033[32mPassed: Test 12\033[0m" << std::endl;
+
+
+
+        
     }
-    // Run all tests
     testApplyRLE();
     testReverseRLE();
     testRLEEdgeCases();
